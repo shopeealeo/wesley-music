@@ -401,6 +401,8 @@ window.onYouTubeIframeAPIReady = () => {
         } catch {}
       },
       onStateChange: (e) => {
+        // Ignore iframe events when native audio is active
+        if (Player.isNative) return;
         if (e.data === YT.PlayerState.ENDED) {
           try {
             const vid = Player.yt.getVideoData && Player.yt.getVideoData().video_id;
@@ -423,11 +425,50 @@ window.onYouTubeIframeAPIReady = () => {
         const best = bestQuality();
         if (e.data && qualityRank(e.data) > qualityRank(best)) applyPlaybackQuality();
       },
-      onError: () => { toast('Track unavailable, skipping…'); setTimeout(() => nextTrack(true), 800); },
+      onError: () => {
+        if (Player.isNative) return;
+        toast('Track unavailable, skipping…'); setTimeout(() => nextTrack(true), 800);
+      },
     },
   });
 };
 (() => { const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s); })();
+
+/* Suspend/resume the YouTube iframe to prevent Chrome Android from
+   killing the audio session when the tab is backgrounded.
+   When native <audio> is active, the iframe must be fully removed from DOM. */
+function suspendIframe() {
+  if (Player.yt && Player.ready && Player.yt.stopVideo) {
+    try { Player.yt.stopVideo(); } catch {}
+  }
+  const holder = document.getElementById('yt-holder');
+  if (holder) {
+    // Remove all iframes inside yt-holder
+    const iframes = holder.querySelectorAll('iframe');
+    iframes.forEach((f) => { try { f.src = 'about:blank'; f.remove(); } catch {} });
+    holder.style.display = 'none';
+  }
+}
+function resumeIframe() {
+  const holder = document.getElementById('yt-holder');
+  if (holder) holder.style.display = '';
+  // If iframe was destroyed, recreate YT player
+  if (!Player.yt || !Player.ready || !document.getElementById('yt-player')) {
+    // Recreate yt-player div
+    const h = document.getElementById('yt-holder');
+    if (h && !document.getElementById('yt-player')) {
+      const div = document.createElement('div');
+      div.id = 'yt-player';
+      h.appendChild(div);
+    }
+    if (h) h.style.display = '';
+    Player.ready = false;
+    Player.yt = null;
+    if (typeof YT !== 'undefined' && YT.Player) {
+      window.onYouTubeIframeAPIReady();
+    }
+  }
+}
 
 function playSong(song, queue = null, index = null) {
   if (!song || !song.videoId) return;
@@ -605,15 +646,11 @@ function startCurrent() {
   if (!s) return;
   const loadId = ++Player.loadId;
 
-  // Stop previous playbacks
-  if (Player.yt && Player.ready && Player.yt.stopVideo) {
-    try { Player.yt.stopVideo(); } catch {}
-  }
-
   // If HQ Iframe mode is forced, use YouTube Iframe directly
   if (Player.hq) {
     Player.isNative = false;
-    if (Player.audio) { try { Player.audio.pause(); } catch {} }
+    if (Player.audio) { try { Player.audio.pause(); Player.audio.removeAttribute('src'); Player.audio.load(); } catch {} }
+    resumeIframe();
     const tryPlayYt = () => {
       if (loadId !== Player.loadId) return;
       if (!Player.ready) return setTimeout(tryPlayYt, 300);
@@ -625,6 +662,8 @@ function startCurrent() {
     tryPlayYt();
   } else {
     // Direct Native Audio Mode via Audio Stream Proxy
+    // CRITICAL: Destroy YouTube iframe so Chrome Android keeps audio alive in background
+    suspendIframe();
     Player.isNative = true;
     Player.unlockAudio();
     if (Player.audio) {
