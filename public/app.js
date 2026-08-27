@@ -185,9 +185,12 @@ const Player = {
   get current() { return this.queue[this.index] || null; },
 
   play() {
-    if (this.isNative && this.audio && this.audio.src) {
-      this.audio.play().catch(() => {
-        if (this.yt && this.ready) this.yt.playVideo();
+    if (this.isNative && this.audio) {
+      if (!this.audio.src && this.current) {
+        this.audio.src = `/api/stream?videoId=${encodeURIComponent(this.current.videoId)}`;
+      }
+      this.audio.play().catch((e) => {
+        console.warn('Native audio play error:', e);
       });
     } else if (this.yt && this.ready) {
       this.yt.playVideo();
@@ -1515,17 +1518,7 @@ function previewSong(song) {
 }
 function openSongNowPlaying(song) {
   if (!song || !song.videoId) return;
-  const same = Player.current && Player.current.videoId === song.videoId;
-  if (!Player.current) {
-    playSong(song);
-  } else if (!same) {
-    previewSong(song);
-  } else {
-    Player.pending = null;
-    renderNowPlaying();
-    updateLikeButtons();
-    renderPlayButtons();
-  }
+  playSong(song);
   openNowPlaying();
   switchNPTab('player');
 }
