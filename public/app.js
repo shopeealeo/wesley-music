@@ -162,6 +162,7 @@ const Library = {
 
 /* ================= player state ================= */
 const Player = {
+  anchor: null,
   yt: null,
   ready: false,
   queue: [],
@@ -181,6 +182,37 @@ const Player = {
   pending: null, // song shown in Now Playing while previous track keeps playing
   loadId: 0,
   get current() { return this.queue[this.index] || null; },
+
+  play() {
+    this.startAnchor();
+    if (this.yt && this.ready && this.yt.playVideo) {
+      try { this.yt.playVideo(); } catch {}
+    }
+  },
+
+  pause() {
+    this.stopAnchor();
+    if (this.yt && this.ready && this.yt.pauseVideo) {
+      try { this.yt.pauseVideo(); } catch {}
+    }
+  },
+
+  startAnchor() {
+    if (!this.anchor) this.anchor = document.getElementById('audio-anchor');
+    if (this.anchor) {
+      try {
+        this.anchor.volume = 0.01;
+        this.anchor.play().catch(() => {});
+      } catch {}
+    }
+  },
+
+  stopAnchor() {
+    if (!this.anchor) this.anchor = document.getElementById('audio-anchor');
+    if (this.anchor) {
+      try { this.anchor.pause(); } catch {}
+    }
+  },
 };
 
 /* Playback uses the official YouTube IFrame.
@@ -269,6 +301,7 @@ window.onYouTubeIframeAPIReady = () => {
       },
       onStateChange: (e) => {
         if (e.data === YT.PlayerState.ENDED) {
+          Player.stopAnchor();
           try {
             const vid = Player.yt.getVideoData && Player.yt.getVideoData().video_id;
             if (vid && Player.current && vid !== Player.current.videoId) return;
@@ -276,10 +309,16 @@ window.onYouTubeIframeAPIReady = () => {
           nextTrack(true);
         }
         if (e.data === YT.PlayerState.PLAYING) {
+          Player.startAnchor();
           setTimeout(maybeRetryLyrics, 600);
           applyPlaybackQuality();
           setTimeout(applyPlaybackQuality, 500);
           setTimeout(applyPlaybackQuality, 2000);
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+        }
+        if (e.data === YT.PlayerState.PAUSED) {
+          Player.stopAnchor();
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
         }
         if (e.data === YT.PlayerState.BUFFERING) applyPlaybackQuality();
         document.body.classList.toggle('paused', e.data !== YT.PlayerState.PLAYING);
@@ -437,6 +476,10 @@ function startCurrent() {
   const s = Player.current;
   if (!s) return;
   const loadId = ++Player.loadId;
+
+  // Start background audio anchor to hold OS audio session
+  Player.startAnchor();
+
   const tryPlay = () => {
     if (loadId !== Player.loadId) return;
     if (!Player.ready) return setTimeout(tryPlay, 300);
@@ -580,8 +623,8 @@ function togglePlay() {
   }
   if (!Player.yt || !Player.ready) return;
   const st = Player.yt.getPlayerState();
-  if (st === YT.PlayerState.PLAYING) Player.yt.pauseVideo();
-  else Player.yt.playVideo();
+  if (st === YT.PlayerState.PLAYING) Player.pause();
+  else Player.play();
 }
 function playPendingSong() {
   const s = Player.pending;
