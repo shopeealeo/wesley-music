@@ -462,14 +462,37 @@ function startCurrent() {
   document.title = `${s.title} • Wesley Music`;
   applyTint(s.videoId || s.title);
   if ('mediaSession' in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: s.title, artist: s.artist || '',
-      artwork: s.thumbnail ? [{ src: s.thumbnail, sizes: '544x544' }] : [],
-    });
-    navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
-    navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(false));
-    navigator.mediaSession.setActionHandler('play', () => Player.yt && Player.yt.playVideo());
-    navigator.mediaSession.setActionHandler('pause', () => Player.yt && Player.yt.pauseVideo());
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: s.title,
+        artist: s.artist || '',
+        album: 'Wesley Music',
+        artwork: s.thumbnail ? [
+          { src: s.thumbnail, sizes: '96x96', type: 'image/jpeg' },
+          { src: s.thumbnail, sizes: '128x128', type: 'image/jpeg' },
+          { src: s.thumbnail, sizes: '192x192', type: 'image/jpeg' },
+          { src: s.thumbnail, sizes: '256x256', type: 'image/jpeg' },
+          { src: s.thumbnail, sizes: '512x512', type: 'image/jpeg' },
+        ] : [],
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
+      navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(false));
+      navigator.mediaSession.setActionHandler('play', () => Player.yt && Player.yt.playVideo && Player.yt.playVideo());
+      navigator.mediaSession.setActionHandler('pause', () => Player.yt && Player.yt.pauseVideo && Player.yt.pauseVideo());
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime != null && Player.yt && Player.yt.seekTo) {
+          Player.yt.seekTo(details.seekTime, true);
+        }
+      });
+      navigator.mediaSession.setActionHandler('seekbackward', () => {
+        const cur = (Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime()) || 0;
+        Player.yt && Player.yt.seekTo && Player.yt.seekTo(Math.max(0, cur - 10), true);
+      });
+      navigator.mediaSession.setActionHandler('seekforward', () => {
+        const cur = (Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime()) || 0;
+        Player.yt && Player.yt.seekTo && Player.yt.seekTo(cur + 10, true);
+      });
+    } catch {}
   }
   loadLyrics(s);
   loadSponsorBlock(s.videoId);
@@ -611,6 +634,15 @@ setInterval(() => {
   if (!isPreviewing()) updateLyricHighlight(cur);
   syncFloatProgress(pct);
   if (Player.floatOn) drawPipFrame(pct);
+  if ('mediaSession' in navigator && navigator.mediaSession.setPositionState && dur > 0) {
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: dur,
+        playbackRate: Player.speed || 1,
+        position: Math.min(cur, dur),
+      });
+    } catch {}
+  }
 }, 400);
 
 function renderPlayButtons() {
@@ -3008,16 +3040,20 @@ function toggleFloatWidget() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (!Player.floatOn || !Player.yt || !Player.ready) return;
-  try { Player.yt.playVideo(); } catch {}
-});
-setInterval(() => {
-  if (!Player.floatOn || !Player.yt || !Player.ready) return;
-  const st = Player.yt.getPlayerState && Player.yt.getPlayerState();
-  if (st === 2 && document.hidden) {
+  if (!Player.yt || !Player.ready || !Player.current) return;
+  if (!document.body.classList.contains('paused')) {
     try { Player.yt.playVideo(); } catch {}
   }
-}, 1500);
+});
+setInterval(() => {
+  if (!Player.yt || !Player.ready || !Player.current) return;
+  if (document.hidden && !document.body.classList.contains('paused')) {
+    const st = Player.yt.getPlayerState && Player.yt.getPlayerState();
+    if (st === 2) {
+      try { Player.yt.playVideo(); } catch {}
+    }
+  }
+}, 500);
 
 
 /* cleanup: unregister any previously installed service worker */
