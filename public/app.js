@@ -185,23 +185,17 @@ const Player = {
   get current() { return this.queue[this.index] || null; },
 
   play() {
+    if (this.yt && this.ready && this.yt.playVideo) {
+      try { this.yt.playVideo(); } catch {}
+    }
     if (this.isNative && this.audio && this.audio.src) {
-      this.audio.play().catch((e) => {
-        console.warn('Native audio play error, trying iframe fallback:', e);
-        if (this.yt && this.ready) {
-          resumeIframe();
-          this.yt.playVideo();
-        }
-      });
-    } else if (this.yt && this.ready) {
-      resumeIframe();
-      this.yt.playVideo();
+      try { this.audio.play().catch(() => {}); } catch {}
     }
   },
 
   pause() {
-    if (this.isNative && this.audio) {
-      this.audio.pause();
+    if (this.audio) {
+      try { this.audio.pause(); } catch {}
     }
     if (this.yt && this.ready && this.yt.pauseVideo) {
       try { this.yt.pauseVideo(); } catch {}
@@ -386,8 +380,6 @@ window.onYouTubeIframeAPIReady = () => {
         } catch {}
       },
       onStateChange: (e) => {
-        // Ignore iframe events when native audio is active
-        if (Player.isNative) return;
         if (e.data === YT.PlayerState.ENDED) {
           try {
             const vid = Player.yt.getVideoData && Player.yt.getVideoData().video_id;
@@ -400,6 +392,10 @@ window.onYouTubeIframeAPIReady = () => {
           applyPlaybackQuality();
           setTimeout(applyPlaybackQuality, 500);
           setTimeout(applyPlaybackQuality, 2000);
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+        }
+        if (e.data === YT.PlayerState.PAUSED) {
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
         }
         if (e.data === YT.PlayerState.BUFFERING) applyPlaybackQuality();
         document.body.classList.toggle('paused', e.data !== YT.PlayerState.PLAYING);
@@ -411,49 +407,12 @@ window.onYouTubeIframeAPIReady = () => {
         if (e.data && qualityRank(e.data) > qualityRank(best)) applyPlaybackQuality();
       },
       onError: () => {
-        if (Player.isNative) return;
         toast('Track unavailable, skipping…'); setTimeout(() => nextTrack(true), 800);
       },
     },
   });
 };
 (() => { const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s); })();
-
-/* Suspend/resume the YouTube iframe to prevent Chrome Android from
-   killing the audio session when the tab is backgrounded.
-   When native <audio> is active, the iframe must be fully removed from DOM. */
-function suspendIframe() {
-  if (Player.yt && Player.ready && Player.yt.stopVideo) {
-    try { Player.yt.stopVideo(); } catch {}
-  }
-  const holder = document.getElementById('yt-holder');
-  if (holder) {
-    // Remove all iframes inside yt-holder
-    const iframes = holder.querySelectorAll('iframe');
-    iframes.forEach((f) => { try { f.src = 'about:blank'; f.remove(); } catch {} });
-    holder.style.display = 'none';
-  }
-}
-function resumeIframe() {
-  const holder = document.getElementById('yt-holder');
-  if (holder) holder.style.display = '';
-  // If iframe was destroyed, recreate YT player
-  if (!Player.yt || !Player.ready || !document.getElementById('yt-player')) {
-    // Recreate yt-player div
-    const h = document.getElementById('yt-holder');
-    if (h && !document.getElementById('yt-player')) {
-      const div = document.createElement('div');
-      div.id = 'yt-player';
-      h.appendChild(div);
-    }
-    if (h) h.style.display = '';
-    Player.ready = false;
-    Player.yt = null;
-    if (typeof YT !== 'undefined' && YT.Player) {
-      window.onYouTubeIframeAPIReady();
-    }
-  }
-}
 
 function playSong(song, queue = null, index = null) {
   if (!song || !song.videoId) return;
@@ -631,56 +590,28 @@ function startCurrent() {
   if (!s) return;
   const loadId = ++Player.loadId;
 
-  const fallbackToIframe = () => {
+  // Stop previous audio
+  if (Player.audio) {
+    try { Player.audio.pause(); Player.audio.removeAttribute('src'); } catch {}
+  }
+
+  // Load and play immediately in the YouTube Player (100% universal across all browsers & songs)
+  const tryPlayYt = () => {
     if (loadId !== Player.loadId) return;
-    Player.isNative = false;
-    if (Player.audio) {
-      try { Player.audio.pause(); Player.audio.removeAttribute('src'); Player.audio.load(); } catch {}
+    if (!Player.ready || !Player.yt || !Player.yt.loadVideoById) {
+      return setTimeout(tryPlayYt, 150);
     }
-    resumeIframe();
-    const tryPlayYt = () => {
-      if (loadId !== Player.loadId) return;
-      if (!Player.ready) return setTimeout(tryPlayYt, 300);
+    try {
       Player.yt.loadVideoById({ videoId: s.videoId, suggestedQuality: suggestedQuality() });
       Player.yt.setPlaybackRate(Player.speed);
+      Player.yt.unMute();
       Player.yt.playVideo();
       applyPlaybackQuality();
-    };
-    tryPlayYt();
-  };
-
-  // If HQ Iframe mode is forced, use YouTube Iframe directly
-  if (Player.hq) {
-    fallbackToIframe();
-  } else {
-    // Direct Native Audio Mode via Audio Stream Proxy
-    Player.isNative = true;
-    if (Player.audio) {
-      const streamUrl = `/api/stream?videoId=${encodeURIComponent(s.videoId)}`;
-      Player.audio.src = streamUrl;
-      Player.audio.playbackRate = Player.speed || 1;
-      const v = store.get('vol', 100);
-      Player.audio.volume = Number(v) / 100;
-
-      const onAudioError = () => {
-        Player.audio.removeEventListener('error', onAudioError);
-        if (loadId === Player.loadId && Player.isNative) {
-          fallbackToIframe();
-        }
-      };
-      Player.audio.addEventListener('error', onAudioError, { once: true });
-
-      Player.audio.play().then(() => {
-        // Direct stream started playing successfully -> suspend iframe for background lockscreen
-        suspendIframe();
-      }).catch((err) => {
-        console.warn('Audio play() threw, falling back to Iframe:', err);
-        fallbackToIframe();
-      });
-    } else {
-      fallbackToIframe();
+    } catch (err) {
+      console.warn('YT loadVideoById error:', err);
     }
-  }
+  };
+  tryPlayYt();
 
   Library.pushHistory(s);
   Player.lyrics = { synced: null, plain: null, source: null, lines: [] };

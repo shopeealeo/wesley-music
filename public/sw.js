@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wesley-music-v7';
+const CACHE_NAME = 'wesley-music-v8';
 const APP_SHELL = [
   '/',
   '/index.html',
