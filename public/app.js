@@ -185,14 +185,16 @@ const Player = {
   get current() { return this.queue[this.index] || null; },
 
   play() {
-    if (this.isNative && this.audio) {
-      if (!this.audio.src && this.current) {
-        this.audio.src = `/api/stream?videoId=${encodeURIComponent(this.current.videoId)}`;
-      }
+    if (this.isNative && this.audio && this.audio.src) {
       this.audio.play().catch((e) => {
-        console.warn('Native audio play error:', e);
+        console.warn('Native audio play error, trying iframe fallback:', e);
+        if (this.yt && this.ready) {
+          resumeIframe();
+          this.yt.playVideo();
+        }
       });
     } else if (this.yt && this.ready) {
+      resumeIframe();
       this.yt.playVideo();
     }
   },
@@ -629,10 +631,12 @@ function startCurrent() {
   if (!s) return;
   const loadId = ++Player.loadId;
 
-  // If HQ Iframe mode is forced, use YouTube Iframe directly
-  if (Player.hq) {
+  const fallbackToIframe = () => {
+    if (loadId !== Player.loadId) return;
     Player.isNative = false;
-    if (Player.audio) { try { Player.audio.pause(); Player.audio.removeAttribute('src'); Player.audio.load(); } catch {} }
+    if (Player.audio) {
+      try { Player.audio.pause(); Player.audio.removeAttribute('src'); Player.audio.load(); } catch {}
+    }
     resumeIframe();
     const tryPlayYt = () => {
       if (loadId !== Player.loadId) return;
@@ -643,18 +647,38 @@ function startCurrent() {
       applyPlaybackQuality();
     };
     tryPlayYt();
+  };
+
+  // If HQ Iframe mode is forced, use YouTube Iframe directly
+  if (Player.hq) {
+    fallbackToIframe();
   } else {
     // Direct Native Audio Mode via Audio Stream Proxy
-    suspendIframe();
     Player.isNative = true;
     if (Player.audio) {
-      Player.audio.src = `/api/stream?videoId=${encodeURIComponent(s.videoId)}`;
+      const streamUrl = `/api/stream?videoId=${encodeURIComponent(s.videoId)}`;
+      Player.audio.src = streamUrl;
       Player.audio.playbackRate = Player.speed || 1;
       const v = store.get('vol', 100);
       Player.audio.volume = Number(v) / 100;
-      Player.audio.play().catch((err) => {
-        console.warn('Audio play() threw:', err);
+
+      const onAudioError = () => {
+        Player.audio.removeEventListener('error', onAudioError);
+        if (loadId === Player.loadId && Player.isNative) {
+          fallbackToIframe();
+        }
+      };
+      Player.audio.addEventListener('error', onAudioError, { once: true });
+
+      Player.audio.play().then(() => {
+        // Direct stream started playing successfully -> suspend iframe for background lockscreen
+        suspendIframe();
+      }).catch((err) => {
+        console.warn('Audio play() threw, falling back to Iframe:', err);
+        fallbackToIframe();
       });
+    } else {
+      fallbackToIframe();
     }
   }
 
