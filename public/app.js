@@ -1,5 +1,5 @@
 /* ============================================================
-   Wesley Music — SPA frontend
+   Weslefy — SPA frontend
    Streams via the official YouTube IFrame player, metadata via
    the local proxy to YouTube Music, synced lyrics via LRCLIB.
    ============================================================ */
@@ -466,7 +466,7 @@ function restoreQueue() {
   renderPlayButtons();
   $('#miniplayer').classList.remove('hidden');
   document.body.classList.add('has-player', 'paused');
-  document.title = `${s.title} • Wesley Music`;
+  document.title = `${s.title} • Weslefy`;
   applyTint(s.videoId || s.title);
   const shOn = Player.shuffle;
   $('#mini-shuffle') && $('#mini-shuffle').classList.toggle('on', shOn);
@@ -532,7 +532,7 @@ function startCurrent() {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: s.title,
         artist: s.artist || '',
-        album: 'Wesley Music',
+        album: 'Weslefy',
         artwork: s.thumbnail ? [
           { src: s.thumbnail, sizes: '96x96', type: 'image/jpeg' },
           { src: s.thumbnail, sizes: '128x128', type: 'image/jpeg' },
@@ -1995,7 +1995,7 @@ function restoreLibrary() {
     reader.onload = () => {
       try {
         const d = JSON.parse(reader.result);
-        if (!d || (d.app !== 'rich-music' && d.app !== 'smw')) throw new Error('Not a Wesley Music backup');
+        if (!d || (d.app !== 'rich-music' && d.app !== 'smw')) throw new Error('Not a Weslefy backup');
         const hasLib = Array.isArray(d.favorites) || Array.isArray(d.playlists) || Array.isArray(d.saved) || Array.isArray(d.history);
         if (!hasLib) throw new Error('Backup file is empty or invalid');
         if (Array.isArray(d.favorites)) store.set('fav', d.favorites);

@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Wesley Music",
-  "short_name": "Wesley",
-  "description": "Pemutar musik web Wesley Music.",
+  "name": "Weslefy",
+  "short_name": "Weslefy",
+  "description": "Pemutar musik web Weslefy.",
   "lang": "id-ID",
   "dir": "ltr",
   "start_url": "/",
