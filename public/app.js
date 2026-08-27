@@ -624,49 +624,18 @@ function startCurrent() {
     };
     tryPlayYt();
   } else {
-    // Direct Native Audio Mode
+    // Direct Native Audio Mode via Audio Stream Proxy
     Player.isNative = true;
-    // Immediately unlock audio synchronously to preserve mobile audio session/focus
     Player.unlockAudio();
-
-    const tryDirectAudio = async () => {
-      try {
-        const res = await fetch(`/api/stream?videoId=${encodeURIComponent(s.videoId)}`);
-        if (loadId !== Player.loadId) return;
-        if (!res.ok) throw new Error(`Stream API status ${res.status}`);
-        const data = await res.json();
-        if (data.url && Player.audio) {
-          Player.audio.src = data.url;
-          Player.audio.playbackRate = Player.speed || 1;
-          const v = store.get('vol', 100);
-          Player.audio.volume = Number(v) / 100;
-          Player.isNative = true;
-          try {
-            await Player.audio.play();
-          } catch (playErr) {
-            console.warn('Audio play() threw:', playErr);
-          }
-          return;
-        }
-        throw new Error('No URL in stream response');
-      } catch (e) {
-        console.warn('Direct stream resolution failed, falling back to Iframe', e);
-        if (loadId !== Player.loadId) return;
-        // Fallback to Iframe only if direct stream API completely failed
-        Player.isNative = false;
-        if (Player.audio) { try { Player.audio.pause(); } catch {} }
-        const tryPlayYt = () => {
-          if (loadId !== Player.loadId) return;
-          if (!Player.ready) return setTimeout(tryPlayYt, 300);
-          Player.yt.loadVideoById({ videoId: s.videoId, suggestedQuality: suggestedQuality() });
-          Player.yt.setPlaybackRate(Player.speed);
-          Player.yt.playVideo();
-          applyPlaybackQuality();
-        };
-        tryPlayYt();
-      }
-    };
-    tryDirectAudio();
+    if (Player.audio) {
+      Player.audio.src = `/api/stream?videoId=${encodeURIComponent(s.videoId)}`;
+      Player.audio.playbackRate = Player.speed || 1;
+      const v = store.get('vol', 100);
+      Player.audio.volume = Number(v) / 100;
+      Player.audio.play().catch((err) => {
+        console.warn('Audio play() threw:', err);
+      });
+    }
   }
 
   Library.pushHistory(s);

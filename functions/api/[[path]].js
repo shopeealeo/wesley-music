@@ -36,6 +36,7 @@ const app = {
       method: request.method,
       path: url.pathname,
       query: Object.fromEntries(url.searchParams.entries()),
+      headers: Object.fromEntries(request.headers.entries()),
     };
 
     try {
@@ -688,11 +689,29 @@ app.get('/api/stream', async (req, res) => {
   if (!/^[\w-]{6,20}$/.test(videoId)) return res.status(400).json({ error: 'bad id' });
   try {
     const stream = await resolveAudioStream(videoId);
-    if (!stream) {
+    if (!stream || !stream.url) {
       return res.status(404).json({ error: 'No direct stream found', fallbackToIframe: true });
     }
-    res.setHeader('Cache-Control', 'public, max-age=1800');
-    res.json(stream);
+
+    const forwardHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    };
+    if (req.headers && req.headers['range']) {
+      forwardHeaders['Range'] = req.headers['range'];
+    }
+
+    const audioRes = await fetch(stream.url, { headers: forwardHeaders });
+    res.status(audioRes.status);
+    res.setHeader('Content-Type', audioRes.headers.get('content-type') || 'audio/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    if (audioRes.headers.has('content-length')) {
+      res.setHeader('Content-Length', audioRes.headers.get('content-length'));
+    }
+    if (audioRes.headers.has('content-range')) {
+      res.setHeader('Content-Range', audioRes.headers.get('content-range'));
+    }
+    res.setHeader('Cache-Control', 'public, max-age=14400');
+    res.send(audioRes.body);
   } catch (e) {
     res.status(500).json({ error: e.message, fallbackToIframe: true });
   }
