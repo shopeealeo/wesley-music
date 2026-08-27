@@ -254,12 +254,23 @@ const Player = {
 
   isPlaying() {
     if (this.isNative && this.audio) {
-      return !this.audio.paused && !this.audio.ended && this.audio.readyState > 1;
+      return !this.audio.paused && !this.audio.ended && this.audio.readyState > 0;
     }
     if (this.yt && this.ready && this.yt.getPlayerState) {
       return this.yt.getPlayerState() === YT.PlayerState.PLAYING;
     }
     return false;
+  },
+
+  unlockAudio() {
+    if (!this.audio) return;
+    try {
+      if (!this.audio.src) {
+        this.audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      }
+      const p = this.audio.play();
+      if (p && p.catch) p.catch(() => {});
+    } catch {}
   },
 };
 
@@ -267,6 +278,16 @@ function initNativeAudio() {
   const a = document.getElementById('audio-player');
   if (!a) return;
   Player.audio = a;
+
+  const unlock = () => {
+    Player.unlockAudio();
+    document.removeEventListener('touchstart', unlock);
+    document.removeEventListener('click', unlock);
+    document.removeEventListener('pointerdown', unlock);
+  };
+  document.addEventListener('touchstart', unlock, { passive: true });
+  document.addEventListener('click', unlock, { passive: true });
+  document.addEventListener('pointerdown', unlock, { passive: true });
 
   a.addEventListener('play', () => {
     document.body.classList.remove('paused');
@@ -288,21 +309,6 @@ function initNativeAudio() {
       return;
     }
     nextTrack(true);
-  });
-
-  a.addEventListener('error', (e) => {
-    console.warn('Native audio player error, fallback to IFrame', e);
-    if (Player.current && Player.isNative) {
-      Player.isNative = false;
-      if (Player.yt && Player.ready) {
-        Player.yt.loadVideoById({
-          videoId: Player.current.videoId,
-          startSeconds: a.currentTime || 0,
-          suggestedQuality: suggestedQuality(),
-        });
-        Player.yt.playVideo();
-      }
-    }
   });
 
   a.addEventListener('timeupdate', () => {
@@ -600,9 +606,6 @@ function startCurrent() {
   const loadId = ++Player.loadId;
 
   // Stop previous playbacks
-  if (Player.audio) {
-    try { Player.audio.pause(); } catch {}
-  }
   if (Player.yt && Player.ready && Player.yt.stopVideo) {
     try { Player.yt.stopVideo(); } catch {}
   }
@@ -610,6 +613,7 @@ function startCurrent() {
   // If HQ Iframe mode is forced, use YouTube Iframe directly
   if (Player.hq) {
     Player.isNative = false;
+    if (Player.audio) { try { Player.audio.pause(); } catch {} }
     const tryPlayYt = () => {
       if (loadId !== Player.loadId) return;
       if (!Player.ready) return setTimeout(tryPlayYt, 300);
@@ -620,38 +624,47 @@ function startCurrent() {
     };
     tryPlayYt();
   } else {
-    // Attempt Direct Audio Stream (Tier 1-3)
+    // Direct Native Audio Mode
+    Player.isNative = true;
+    // Immediately unlock audio synchronously to preserve mobile audio session/focus
+    Player.unlockAudio();
+
     const tryDirectAudio = async () => {
       try {
         const res = await fetch(`/api/stream?videoId=${encodeURIComponent(s.videoId)}`);
         if (loadId !== Player.loadId) return;
-        if (res.ok) {
-          const data = await res.json();
-          if (data.url && Player.audio) {
-            Player.audio.src = data.url;
-            Player.audio.playbackRate = Player.speed || 1;
-            const v = store.get('vol', 100);
-            Player.audio.volume = Number(v) / 100;
-            Player.isNative = true;
+        if (!res.ok) throw new Error(`Stream API status ${res.status}`);
+        const data = await res.json();
+        if (data.url && Player.audio) {
+          Player.audio.src = data.url;
+          Player.audio.playbackRate = Player.speed || 1;
+          const v = store.get('vol', 100);
+          Player.audio.volume = Number(v) / 100;
+          Player.isNative = true;
+          try {
             await Player.audio.play();
-            return;
+          } catch (playErr) {
+            console.warn('Audio play() threw:', playErr);
           }
+          return;
         }
+        throw new Error('No URL in stream response');
       } catch (e) {
         console.warn('Direct stream resolution failed, falling back to Iframe', e);
-      }
-      // Tier 4: Fallback to Iframe
-      if (loadId !== Player.loadId) return;
-      Player.isNative = false;
-      const tryPlayYt = () => {
         if (loadId !== Player.loadId) return;
-        if (!Player.ready) return setTimeout(tryPlayYt, 300);
-        Player.yt.loadVideoById({ videoId: s.videoId, suggestedQuality: suggestedQuality() });
-        Player.yt.setPlaybackRate(Player.speed);
-        Player.yt.playVideo();
-        applyPlaybackQuality();
-      };
-      tryPlayYt();
+        // Fallback to Iframe only if direct stream API completely failed
+        Player.isNative = false;
+        if (Player.audio) { try { Player.audio.pause(); } catch {} }
+        const tryPlayYt = () => {
+          if (loadId !== Player.loadId) return;
+          if (!Player.ready) return setTimeout(tryPlayYt, 300);
+          Player.yt.loadVideoById({ videoId: s.videoId, suggestedQuality: suggestedQuality() });
+          Player.yt.setPlaybackRate(Player.speed);
+          Player.yt.playVideo();
+          applyPlaybackQuality();
+        };
+        tryPlayYt();
+      }
     };
     tryDirectAudio();
   }
