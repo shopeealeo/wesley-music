@@ -205,6 +205,24 @@ const Player = {
         this.anchor.play().catch(() => {});
       } catch {}
     }
+    // Web Audio API hardware session lock
+    try {
+      if (!this.audioCtx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          this.audioCtx = new AudioCtx();
+          const osc = this.audioCtx.createOscillator();
+          const gain = this.audioCtx.createGain();
+          gain.gain.value = 0.0001; // completely inaudible
+          osc.connect(gain);
+          gain.connect(this.audioCtx.destination);
+          osc.start();
+        }
+      }
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {});
+      }
+    } catch {}
   },
 
   stopAnchor() {
@@ -212,6 +230,11 @@ const Player = {
     if (this.anchor) {
       try { this.anchor.pause(); } catch {}
     }
+    try {
+      if (this.audioCtx && this.audioCtx.state === 'running') {
+        this.audioCtx.suspend().catch(() => {});
+      }
+    } catch {}
   },
 };
 
