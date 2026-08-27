@@ -1,10 +1,11 @@
-const CACHE_NAME = 'wesley-music-v12';
+const CACHE_NAME = 'wesley-music-v13';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/styles.css',
   '/app.js',
   '/manifest.webmanifest',
+  '/Animasiloading.gif',
   '/logo-192.png',
   '/icon-512.png',
   '/favicon-32.png',
