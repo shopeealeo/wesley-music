@@ -509,6 +509,152 @@ app.get('/api/browse', async (req, res) => {
   }
 });
 
+/* ---------------- direct audio streaming endpoint with multi-tier fallback ---------------- */
+async function resolveAudioStream(videoId) {
+  // Tier 1: ANDROID_VR client (high performance, unthrottled itag 140 m4a / itag 251 opus)
+  try {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 12; Quest 3) AppleWebKit/537.36',
+        Origin: 'https://www.youtube.com',
+        Referer: 'https://www.youtube.com/',
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'ANDROID_VR',
+            clientVersion: '1.60.19',
+            hl: 'id',
+            gl: 'ID',
+          },
+        },
+        videoId,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const formats = (data.streamingData && data.streamingData.adaptiveFormats) || [];
+      const audioFormats = formats.filter(
+        (f) => f.mimeType && f.mimeType.startsWith('audio/') && f.url
+      );
+      if (audioFormats.length > 0) {
+        // prefer itag 140 (m4a ~130kbps) for universal iOS/Android/Desktop support, or itag 251 (opus)
+        const best =
+          audioFormats.find((f) => f.itag === 140) ||
+          audioFormats.find((f) => f.itag === 251) ||
+          audioFormats[0];
+        return {
+          url: best.url,
+          mimeType: best.mimeType,
+          itag: best.itag,
+          bitrate: best.bitrate,
+          durationMs: best.approxDurationMs ? parseInt(best.approxDurationMs, 10) : null,
+          tier: 'ANDROID_VR',
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Tier 1 stream resolver failed:', e.message);
+  }
+
+  // Tier 2: ANDROID_TESTSUITE client fallback
+  try {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'com.google.android.youtube/19.29.35 (Linux; U; Android 14) gzip',
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'ANDROID_TESTSUITE',
+            clientVersion: '1.9',
+            hl: 'id',
+            gl: 'ID',
+          },
+        },
+        videoId,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const formats = (data.streamingData && data.streamingData.adaptiveFormats) || [];
+      const audioFormats = formats.filter(
+        (f) => f.mimeType && f.mimeType.startsWith('audio/') && f.url
+      );
+      if (audioFormats.length > 0) {
+        const best =
+          audioFormats.find((f) => f.itag === 140) ||
+          audioFormats.find((f) => f.itag === 251) ||
+          audioFormats[0];
+        return {
+          url: best.url,
+          mimeType: best.mimeType,
+          itag: best.itag,
+          bitrate: best.bitrate,
+          durationMs: best.approxDurationMs ? parseInt(best.approxDurationMs, 10) : null,
+          tier: 'ANDROID_TESTSUITE',
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Tier 2 stream resolver failed:', e.message);
+  }
+
+  // Tier 3: Public Piped / Invidious fallback instance
+  const fallbacks = [
+    `https://api.piped.private.coffee/streams/${videoId}`,
+    `https://invidious.asir.dev/api/v1/videos/${videoId}`,
+  ];
+  for (const fbUrl of fallbacks) {
+    try {
+      const r = await fetch(fbUrl, {
+        headers: { 'User-Agent': 'WesleyMusic/1.0' },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        const streams =
+          d.audioStreams ||
+          (d.adaptiveFormats &&
+            d.adaptiveFormats.filter((f) => f.type && f.type.startsWith('audio/')));
+        if (streams && streams.length > 0 && streams[0].url) {
+          return {
+            url: streams[0].url,
+            mimeType: streams[0].mimeType || streams[0].type || 'audio/mp4',
+            itag: streams[0].itag || null,
+            bitrate: streams[0].bitrate || null,
+            durationMs: null,
+            tier: 'EXTERNAL_RESOLVER',
+          };
+        }
+      }
+    } catch {
+      // ignore and try next
+    }
+  }
+
+  return null;
+}
+
+app.get('/api/stream', async (req, res) => {
+  const videoId = String(req.query.videoId || '').trim();
+  if (!/^[\w-]{6,20}$/.test(videoId)) return res.status(400).json({ error: 'bad id' });
+  try {
+    const stream = await resolveAudioStream(videoId);
+    if (!stream) {
+      return res.status(404).json({ error: 'No direct stream found', fallbackToIframe: true });
+    }
+    res.setHeader('Cache-Control', 'public, max-age=1800');
+    res.json(stream);
+  } catch (e) {
+    res.status(500).json({ error: e.message, fallbackToIframe: true });
+  }
+});
+
 /* ---------------- music download via third-party converter (loader.to) ----------------
    Highest quality MP3 (320kbps). Our server orchestrates the conversion job:
    start -> poll progress -> hand the final direct file URL to the browser.
