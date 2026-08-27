@@ -3137,7 +3137,7 @@ if ('serviceWorker' in navigator) {
     splash.classList.add('gone');
     setTimeout(() => splash.remove(), 700);
   };
-  setTimeout(hide, 3000);
+  setTimeout(hide, 4000);
 })();
 renderNav();
 renderSideQueue();
