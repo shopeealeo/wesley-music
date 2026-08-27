@@ -1,7 +1,7 @@
 /* ============================================================
    Wesley Music — SPA frontend
-   Streams via the official Oritube IFrame player, metadata via
-   the local proxy to Oritube Music, synced lyrics via LRCLIB.
+   Streams via the official YouTube IFrame player, metadata via
+   the local proxy to YouTube Music, synced lyrics via LRCLIB.
    ============================================================ */
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -162,8 +162,6 @@ const Library = {
 
 /* ================= player state ================= */
 const Player = {
-  audio: null,
-  isNative: true,
   yt: null,
   ready: false,
   queue: [],
@@ -177,135 +175,17 @@ const Player = {
   speed: 1,
   sbSegments: [],
   sbEnabled: store.get('sb_on', true),
-  hq: store.get('yt_hq', false), // false = Oritube Music audio, true = Oritube max quality
+  hq: store.get('yt_hq', false), // false = YouTube Music audio, true = YouTube max quality
   quality: 'hd720',
   cued: false,
   pending: null, // song shown in Now Playing while previous track keeps playing
   loadId: 0,
   get current() { return this.queue[this.index] || null; },
-
-  play() {
-    if (this.yt && this.ready && this.yt.playVideo) {
-      try { this.yt.playVideo(); } catch {}
-    }
-    if (this.isNative && this.audio && this.audio.src) {
-      try { this.audio.play().catch(() => {}); } catch {}
-    }
-  },
-
-  pause() {
-    if (this.audio) {
-      try { this.audio.pause(); } catch {}
-    }
-    if (this.yt && this.ready && this.yt.pauseVideo) {
-      try { this.yt.pauseVideo(); } catch {}
-    }
-  },
-
-  seekTo(seconds, allowSeekAhead = true) {
-    if (this.isNative && this.audio && !isNaN(seconds)) {
-      this.audio.currentTime = seconds;
-    }
-    if (this.yt && this.ready && this.yt.seekTo) {
-      try { this.yt.seekTo(seconds, allowSeekAhead); } catch {}
-    }
-  },
-
-  setVolume(volPercent) {
-    const v = Number(volPercent);
-    if (this.audio) {
-      this.audio.volume = Math.max(0, Math.min(1, v / 100));
-    }
-    if (this.yt && this.ready && this.yt.setVolume) {
-      try { this.yt.setVolume(v); } catch {}
-    }
-  },
-
-  setPlaybackRate(rate) {
-    this.speed = rate;
-    if (this.audio) {
-      this.audio.playbackRate = rate;
-    }
-    if (this.yt && this.ready && this.yt.setPlaybackRate) {
-      try { this.yt.setPlaybackRate(rate); } catch {}
-    }
-  },
-
-  getCurrentTime() {
-    if (this.isNative && this.audio && !isNaN(this.audio.currentTime)) {
-      return this.audio.currentTime;
-    }
-    if (this.yt && this.ready && this.yt.getCurrentTime) {
-      return this.yt.getCurrentTime() || 0;
-    }
-    return 0;
-  },
-
-  getDuration() {
-    if (this.isNative && this.audio && !isNaN(this.audio.duration) && this.audio.duration > 0) {
-      return this.audio.duration;
-    }
-    if (this.yt && this.ready && this.yt.getDuration) {
-      return this.yt.getDuration() || 0;
-    }
-    return 0;
-  },
-
-  isPlaying() {
-    if (this.isNative && this.audio) {
-      return !this.audio.paused && !this.audio.ended && this.audio.readyState > 0;
-    }
-    if (this.yt && this.ready && this.yt.getPlayerState) {
-      return this.yt.getPlayerState() === YT.PlayerState.PLAYING;
-    }
-    return false;
-  },
 };
 
-function initNativeAudio() {
-  const a = document.getElementById('audio-player');
-  if (!a) return;
-  Player.audio = a;
-
-  a.addEventListener('play', () => {
-    document.body.classList.remove('paused');
-    renderPlayButtons();
-    setTimeout(maybeRetryLyrics, 600);
-    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-  });
-
-  a.addEventListener('pause', () => {
-    document.body.classList.add('paused');
-    renderPlayButtons();
-    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
-  });
-
-  a.addEventListener('ended', () => {
-    if (!Player.current || !a.duration || a.duration < 2) return;
-    if (Player.repeat === 2) {
-      Player.seekTo(0);
-      Player.play();
-      return;
-    }
-    nextTrack(true);
-  });
-
-  a.addEventListener('timeupdate', () => {
-    if ('mediaSession' in navigator && navigator.mediaSession.setPositionState && a.duration && !isNaN(a.duration) && a.duration > 0) {
-      try {
-        navigator.mediaSession.setPositionState({
-          duration: a.duration,
-          playbackRate: a.playbackRate || 1,
-          position: Math.min(a.currentTime, a.duration),
-        });
-      } catch {}
-    }
-  });
-}
-
-/* Playback uses Direct Audio Stream with Oritube IFrame fallback.
-   Default: Direct Audio Stream at ~130kbps M4A / Opus.
-   Quality ON: Oritube max (1080p–4K) for highest available bitrate. */
+/* Playback uses the official YouTube IFrame.
+   Default: YouTube Music audio version (official audio / ATV) at hd720.
+   Quality ON: YouTube max (1080p–4K) for the highest audio bitrate. */
 const QUALITY_RANK = ['highres', 'hd2160', 'hd1440', 'hd1080', 'hd720', 'large', 'medium', 'small', 'tiny'];
 const qualityRank = (q) => { const i = QUALITY_RANK.indexOf(q); return i < 0 ? 99 : i; };
 function bestQuality() {
@@ -334,10 +214,10 @@ function updateQualityButton() {
   if (!btn) return;
   btn.classList.toggle('on', !!Player.hq);
   const span = btn.querySelector('span');
-  if (span) span.textContent = Player.hq ? 'Max' : 'Direct';
+  if (span) span.textContent = Player.hq ? 'Max' : 'Quality';
   btn.title = Player.hq
-    ? 'Oritube max quality — tap for Direct Audio Stream'
-    : 'Direct Audio Stream (Spotify-style) — tap for Oritube max quality';
+    ? 'YouTube max quality — tap for YouTube Music audio'
+    : 'YouTube Music audio — tap for YouTube max quality';
   document.body.classList.toggle('hq-audio', !!Player.hq);
   syncNpMore();
 }
@@ -345,12 +225,20 @@ function toggleQuality() {
   Player.hq = !Player.hq;
   store.set('yt_hq', Player.hq);
   updateQualityButton();
-  toast(Player.hq ? 'Oritube max quality (Iframe)' : 'Direct Audio Stream (Fast)');
-  if (Player.cued || !Player.current) {
+  toast(Player.hq ? 'YouTube max quality' : 'YouTube Music audio');
+  if (Player.cued || !Player.yt || !Player.ready || !Player.current) {
     applyPlaybackQuality();
     return;
   }
-  startCurrent();
+  const t = (Player.yt.getCurrentTime && Player.yt.getCurrentTime()) || 0;
+  Player.yt.loadVideoById({
+    videoId: Player.current.videoId,
+    startSeconds: t,
+    suggestedQuality: suggestedQuality(),
+  });
+  applyPlaybackQuality();
+  setTimeout(applyPlaybackQuality, 400);
+  setTimeout(applyPlaybackQuality, 1600);
 }
 
 window.onYouTubeIframeAPIReady = () => {
@@ -392,10 +280,6 @@ window.onYouTubeIframeAPIReady = () => {
           applyPlaybackQuality();
           setTimeout(applyPlaybackQuality, 500);
           setTimeout(applyPlaybackQuality, 2000);
-          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-        }
-        if (e.data === YT.PlayerState.PAUSED) {
-          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
         }
         if (e.data === YT.PlayerState.BUFFERING) applyPlaybackQuality();
         document.body.classList.toggle('paused', e.data !== YT.PlayerState.PLAYING);
@@ -406,9 +290,7 @@ window.onYouTubeIframeAPIReady = () => {
         const best = bestQuality();
         if (e.data && qualityRank(e.data) > qualityRank(best)) applyPlaybackQuality();
       },
-      onError: () => {
-        toast('Track unavailable, skipping…'); setTimeout(() => nextTrack(true), 800);
-      },
+      onError: () => { toast('Track unavailable, skipping…'); setTimeout(() => nextTrack(true), 800); },
     },
   });
 };
@@ -549,70 +431,23 @@ function moveQueued(i, dir) {
   renderQueue();
 }
 
-function updateMediaSession(s) {
-  if (!('mediaSession' in navigator)) return;
-  s = s || Player.current;
-  if (!s) return;
-  navigator.mediaSession.metadata = new MediaMetadata({
-    title: s.title || 'Unknown Title',
-    artist: s.artist || s.subtitle || 'Wesley Music',
-    album: s.album || 'Wesley Music',
-    artwork: s.thumbnail ? [
-      { src: s.thumbnail, sizes: '96x96', type: 'image/jpeg' },
-      { src: s.thumbnail, sizes: '128x128', type: 'image/jpeg' },
-      { src: s.thumbnail, sizes: '192x192', type: 'image/jpeg' },
-      { src: s.thumbnail, sizes: '256x256', type: 'image/jpeg' },
-      { src: s.thumbnail, sizes: '512x512', type: 'image/jpeg' },
-    ] : [],
-  });
-  navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
-  navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(false));
-  navigator.mediaSession.setActionHandler('play', () => Player.play());
-  navigator.mediaSession.setActionHandler('pause', () => Player.pause());
-  try {
-    navigator.mediaSession.setActionHandler('seekto', (details) => {
-      if (details.seekTime != null) Player.seekTo(details.seekTime);
-    });
-    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-      Player.seekTo(Math.max(0, Player.getCurrentTime() - (details.seekOffset || 10)));
-    });
-    navigator.mediaSession.setActionHandler('seekforward', (details) => {
-      Player.seekTo(Math.min(Player.getDuration(), Player.getCurrentTime() + (details.seekOffset || 10)));
-    });
-    navigator.mediaSession.setActionHandler('stop', () => Player.pause());
-  } catch {}
-}
-
 function startCurrent() {
   Player.cued = false;
   Player.pending = null;
   const s = Player.current;
   if (!s) return;
   const loadId = ++Player.loadId;
-
-  // Stop previous audio
-  if (Player.audio) {
-    try { Player.audio.pause(); Player.audio.removeAttribute('src'); } catch {}
-  }
-
-  // Load and play immediately in the YouTube Player (100% universal across all browsers & songs)
-  const tryPlayYt = () => {
+  const tryPlay = () => {
     if (loadId !== Player.loadId) return;
-    if (!Player.ready || !Player.yt || !Player.yt.loadVideoById) {
-      return setTimeout(tryPlayYt, 150);
-    }
-    try {
-      Player.yt.loadVideoById({ videoId: s.videoId, suggestedQuality: suggestedQuality() });
-      Player.yt.setPlaybackRate(Player.speed);
-      Player.yt.unMute();
-      Player.yt.playVideo();
-      applyPlaybackQuality();
-    } catch (err) {
-      console.warn('YT loadVideoById error:', err);
-    }
+    if (!Player.ready) return setTimeout(tryPlay, 300);
+    Player.yt.loadVideoById({ videoId: s.videoId, suggestedQuality: suggestedQuality() });
+    Player.yt.setPlaybackRate(Player.speed);
+    Player.yt.playVideo();
+    applyPlaybackQuality();
+    setTimeout(applyPlaybackQuality, 400);
+    setTimeout(applyPlaybackQuality, 1600);
   };
-  tryPlayYt();
-
+  tryPlay();
   Library.pushHistory(s);
   Player.lyrics = { synced: null, plain: null, source: null, lines: [] };
   Player._lyricsRetried = false;
@@ -626,8 +461,16 @@ function startCurrent() {
   document.body.classList.add('has-player');
   document.title = `${s.title} • Wesley Music`;
   applyTint(s.videoId || s.title);
-  updateMediaSession(s);
-
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: s.title, artist: s.artist || '',
+      artwork: s.thumbnail ? [{ src: s.thumbnail, sizes: '544x544' }] : [],
+    });
+    navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
+    navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack(false));
+    navigator.mediaSession.setActionHandler('play', () => Player.yt && Player.yt.playVideo());
+    navigator.mediaSession.setActionHandler('pause', () => Player.yt && Player.yt.pauseVideo());
+  }
   loadLyrics(s);
   loadSponsorBlock(s.videoId);
   // refresh related tab lazily
@@ -676,7 +519,7 @@ function nextTrack(auto) {
     togglePlay();
     return;
   }
-  if (Player.repeat === 2 && auto) { Player.seekTo(0); Player.play(); return; }
+  if (Player.repeat === 2 && auto) { Player.yt.seekTo(0); Player.yt.playVideo(); return; }
   if (!Player.queue.length) return;
   let ni;
   if (Player.shuffle) {
@@ -699,10 +542,9 @@ function nextTrack(auto) {
 }
 function prevTrack() {
   if (Player.cued) { togglePlay(); return; }
-  const cur = Player.getCurrentTime();
-  if (cur > 4) { Player.seekTo(0); return; }
+  if (Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime() > 4) { Player.yt.seekTo(0); return; }
   if (Player.index > 0) { Player.index--; startCurrent(); }
-  else Player.seekTo(0);
+  else if (Player.yt) Player.yt.seekTo(0);
 }
 function togglePlay() {
   if (!Player.current) return;
@@ -713,8 +555,10 @@ function togglePlay() {
     if (!hasRadio) fetchQueue(s);
     return;
   }
-  if (Player.isPlaying()) Player.pause();
-  else Player.play();
+  if (!Player.yt || !Player.ready) return;
+  const st = Player.yt.getPlayerState();
+  if (st === YT.PlayerState.PLAYING) Player.yt.pauseVideo();
+  else Player.yt.playVideo();
 }
 function playPendingSong() {
   const s = Player.pending;
@@ -737,10 +581,10 @@ function toggleNowPlayingPlay() {
 /* progress loop */
 let _lastTick = null;
 setInterval(() => {
-  if (!Player.current) return;
-  const cur = Player.getCurrentTime() || 0;
-  const dur = Player.getDuration() || 0;
-  const playing = Player.isPlaying();
+  if (!Player.yt || !Player.ready || !Player.current || !Player.yt.getDuration) return;
+  const cur = Player.yt.getCurrentTime() || 0;
+  // local scrobble: accumulate listen time while playing
+  const playing = Player.yt.getPlayerState && Player.yt.getPlayerState() === YT.PlayerState.PLAYING;
   const now = Date.now();
   if (playing && _lastTick) Library.addListenTime(Player.current.videoId, Math.min(2, (now - _lastTick) / 1000));
   _lastTick = now;
@@ -748,10 +592,11 @@ setInterval(() => {
   if (playing && Player.sbEnabled && Player.sbSegments.length) {
     const seg = Player.sbSegments.find((g) => cur >= g.start && cur < g.end - 0.3);
     if (seg) {
-      Player.seekTo(seg.end, true);
+      Player.yt.seekTo(seg.end, true);
       toast(`⏩ Skipped ${seg.category.replace('_', ' ')} (SponsorBlock)`);
     }
   }
+  const dur = Player.yt.getDuration() || 0;
   const pct = dur ? (cur / dur) * 100 : 0;
   $('#mini-progress-fill').style.width = pct + '%';
   const knob = $('.pb-knob');
@@ -766,14 +611,17 @@ setInterval(() => {
   if (!isPreviewing()) updateLyricHighlight(cur);
   syncFloatProgress(pct);
   if (Player.floatOn) drawPipFrame(pct);
-}, 250);
+}, 400);
 
 function renderPlayButtons() {
-  const actuallyPlaying = Player.isPlaying();
+  const actuallyPlaying = Player.yt && Player.ready && Player.yt.getPlayerState && Player.yt.getPlayerState() === YT.PlayerState.PLAYING;
   const preview = isPreviewing();
   $('#mini-play').innerHTML = icon(actuallyPlaying ? 'i-pause' : 'i-play');
   $('#np-play').innerHTML = icon(!preview && actuallyPlaying ? 'i-pause' : 'i-play');
   const pn = $('#np-playnext');
+  const qa = $('#np-queueadd');
+  if (pn) pn.classList.toggle('hidden', !preview);
+  if (qa) qa.classList.toggle('hidden', !preview);
   syncFloatWidget();
 }
 
@@ -790,7 +638,7 @@ const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 function cycleSpeed() {
   const i = SPEEDS.indexOf(Player.speed);
   Player.speed = SPEEDS[(i + 1) % SPEEDS.length];
-  Player.setPlaybackRate(Player.speed);
+  if (Player.yt && Player.ready) Player.yt.setPlaybackRate(Player.speed);
   $('#np-speed span').textContent = Player.speed + '×';
   persistQueue();
   toast(`Speed: ${Player.speed}×`);
@@ -809,7 +657,8 @@ async function loadLyrics(song, { silent = false } = {}) {
   if (!song) return;
   const myReq = ++lyricsReqId;
   const durationSec = (() => {
-    return Math.round(Player.getDuration() || 0);
+    if (Player.yt && Player.ready && Player.yt.getDuration) return Math.round(Player.yt.getDuration() || 0);
+    return 0;
   })();
   Player._lyricsDur = durationSec;
   const artist = [song.artist, song.artists && song.artists[0] && song.artists[0].name, song.subtitle]
@@ -835,8 +684,8 @@ async function loadLyrics(song, { silent = false } = {}) {
    or when the first attempt found nothing */
 function maybeRetryLyrics() {
   const s = Player.current;
-  if (!s) return;
-  const dur = Math.round(Player.getDuration() || 0);
+  if (!s || !Player.yt || !Player.ready || !Player.yt.getDuration) return;
+  const dur = Math.round(Player.yt.getDuration() || 0);
   if (!dur) return;
   const noLyrics = !Player.lyrics.synced && !Player.lyrics.plain;
   const durChanged = Math.abs(dur - (Player._lyricsDur || 0)) > 2;
@@ -861,7 +710,7 @@ function renderLyrics() {
   const L = Player.lyrics;
   if (L.lines.length) {
     c.innerHTML = L.lines.map((l, i) => `<div class="lyric-line" data-i="${i}" data-t="${l.t}">${esc(l.text) || '♪'}</div>`).join('');
-    $$('.lyric-line', c).forEach((el) => el.addEventListener('click', () => { Player.seekTo(parseFloat(el.dataset.t)); Player.play(); }));
+    $$('.lyric-line', c).forEach((el) => el.addEventListener('click', () => { Player.yt.seekTo(parseFloat(el.dataset.t)); Player.yt.playVideo(); }));
   } else if (L.plain) {
     c.innerHTML = `<div class="lyric-plain">${esc(L.plain)}</div>`;
   } else {
@@ -1451,7 +1300,17 @@ function previewSong(song) {
 }
 function openSongNowPlaying(song) {
   if (!song || !song.videoId) return;
-  playSong(song);
+  const same = Player.current && Player.current.videoId === song.videoId;
+  if (!Player.current) {
+    playSong(song);
+  } else if (!same) {
+    previewSong(song);
+  } else {
+    Player.pending = null;
+    renderNowPlaying();
+    updateLikeButtons();
+    renderPlayButtons();
+  }
   openNowPlaying();
   switchNPTab('player');
 }
@@ -1835,7 +1694,7 @@ async function viewCharts(view) {
   bindItems(view);
 }
 
-/* Spotify browse-tile palette (fallback when SP colors are missing) */
+/* Spotify browse-tile palette (fallback when YT colors are missing) */
 const MOOD_COLORS = ['#1db954','#e13300','#7358ff','#e8115b','#148a08','#dc148c','#bc5900','#8d67ab','#e91429','#1e3264','#537aa1','#af2896','#477d95','#ba5d07','#0d73ec','#8c1932'];
 
 /* ---- Moods ---- */
@@ -1905,14 +1764,14 @@ function viewLibrary(view, tab) {
     const pls = Library.playlists;
     body = `<div class="lib-actions">
         <button class="pill-btn primary" id="btn-newpl">${icon('i-plus')}<span>New playlist</span></button>
-        <button class="pill-btn" id="btn-import">${icon('i-download')}<span>Import from SP Music</span></button>
+        <button class="pill-btn" id="btn-import">${icon('i-download')}<span>Import from YT Music</span></button>
         <button class="pill-btn" id="btn-backup">${icon('i-download')}<span>Backup</span></button>
         <button class="pill-btn" id="btn-restore">${icon('i-upload')}<span>Restore</span></button>
       </div>`;
     const cards = (Library.favorites.length ? likedCardHTML() : '') + pls.map((p) => `<div class="card" data-pl="${p.id}"><div class="art">${coverHTML(p.tracks[0] && p.tracks[0].thumbnail)}<div class="play-ov">${icon('i-play')}</div></div><div class="t">${esc(p.name)}</div><div class="s">${p.tracks.length} songs</div></div>`).join('');
     body += cards
       ? `<div class="lib-grid">${cards}</div>`
-      : emptyHTML('No playlists yet', 'Use New playlist above, or import one from Oritube Music.', { ic: 'i-note' });
+      : emptyHTML('No playlists yet', 'Use New playlist above, or import one from YouTube Music.', { ic: 'i-note' });
   }
   view.innerHTML = `<div class="page-title">Library</div>
     <div class="chip-row">${tabs.map(([id, l]) => `<button class="chip ${tab === id ? 'active' : ''}" onclick="location.hash='#/library/${id}'">${l}</button>`).join('')}</div>${body}`;
@@ -1933,18 +1792,18 @@ function viewLibrary(view, tab) {
   $$('[data-nav]', view).forEach((el) => el.addEventListener('click', () => go(el.dataset.nav)));
 }
 
-/* ---- import a public SP Music playlist/album into local library ---- */
+/* ---- import a public YT Music playlist/album into local library ---- */
 function openImportForm() {
   const modal = $('#modal');
   const body = $('#modal-body');
   const actions = $('.modal-actions');
-  $('#modal-title').textContent = 'Import from Oritube Music';
+  $('#modal-title').textContent = 'Import from YouTube Music';
   if (actions) actions.classList.add('hidden');
   body.innerHTML = `<form class="pl-form" id="im-form" autocomplete="off">
       <div class="pl-form-cover im" aria-hidden="true">${icon('i-download')}</div>
       <label class="pl-form-label" for="im-form-url">Link</label>
       <input id="im-form-url" class="pl-form-input" type="text" inputmode="url" placeholder="https://music.youtube.com/playlist?list=…" />
-      <div class="pl-form-hint">Paste a public Oritube Music playlist, album, artist, or song link.</div>
+      <div class="pl-form-hint">Paste a public YouTube Music playlist, album, artist, or song link.</div>
       <div class="pl-form-actions">
         <button type="button" class="pill-btn" id="im-form-cancel">Cancel</button>
         <button type="submit" class="pill-btn primary" id="im-form-go">${icon('i-download')}<span>Import</span></button>
@@ -2000,7 +1859,7 @@ async function importFromLink(url) {
 /* ---- backup / restore whole local library as a JSON file ---- */
 function backupLibrary() {
   const data = {
-    app: 'wesley-music',
+    app: 'rich-music',
     version: 2,
     exportedAt: new Date().toISOString(),
     favorites: Library.favorites,
@@ -2019,7 +1878,7 @@ function backupLibrary() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `wesley-music-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `rich-music-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
@@ -2038,7 +1897,7 @@ function restoreLibrary() {
     reader.onload = () => {
       try {
         const d = JSON.parse(reader.result);
-        if (!d || (d.app !== 'wesley-music' && d.app !== 'rich-music' && d.app !== 'smw')) throw new Error('Not a Wesley Music backup');
+        if (!d || (d.app !== 'rich-music' && d.app !== 'smw')) throw new Error('Not a Wesley Music backup');
         const hasLib = Array.isArray(d.favorites) || Array.isArray(d.playlists) || Array.isArray(d.saved) || Array.isArray(d.history);
         if (!hasLib) throw new Error('Backup file is empty or invalid');
         if (Array.isArray(d.favorites)) store.set('fav', d.favorites);
@@ -2056,7 +1915,7 @@ function restoreLibrary() {
             store.set('vol', d.settings.vol);
             $('#mini-volume').value = d.settings.vol;
             $('#np-volume').value = d.settings.vol;
-            Player.setVolume(d.settings.vol);
+            if (Player.yt && Player.ready) Player.yt.setVolume(d.settings.vol);
           }
           if (typeof d.settings.sb_on === 'boolean') {
             store.set('sb_on', d.settings.sb_on);
@@ -2283,7 +2142,7 @@ function openNowPlayingMore() {
     ${row('artist', 'i-search', 'Go to artist')}
     ${row('speed', 'i-clock', `Speed · ${Player.speed}×`)}
     ${row('float', 'i-pip', Player.floatOn ? 'Widget on' : 'Widget')}
-    ${row('quality', 'i-expand', Player.hq ? 'Quality · Max' : 'Quality · Oritube Music')}
+    ${row('quality', 'i-expand', Player.hq ? 'Quality · Max' : 'Quality · YouTube Music')}
     ${row('sb', 'i-next', Player.sbEnabled ? 'SponsorBlock on' : 'SponsorBlock')}`;
   $$('[data-npact]', body).forEach((b) => b.addEventListener('click', () => {
     const a = b.dataset.npact;
@@ -2384,7 +2243,7 @@ function openSleepTimer() {
     $('#np-sleep') && $('#np-sleep').classList.remove('on');
     if (m > 0) {
       Player.sleepTimer = setTimeout(() => {
-        Player.pause();
+        Player.yt && Player.yt.pauseVideo();
         Player.sleepTimer = null;
         $('#np-sleep') && $('#np-sleep').classList.remove('on');
         toast('Sleep timer: paused');
@@ -2519,7 +2378,7 @@ function openDeletePlaylist(pid) {
   if (actions) actions.classList.add('hidden');
   body.innerHTML = `<div class="pl-form">
       <div class="pl-form-cover im" aria-hidden="true">${icon('i-trash')}</div>
-      <div class="pl-form-hint">Delete “${esc(pl.name)}”? This can’t be undone. The songs themselves stay in Oritube Music.</div>
+      <div class="pl-form-hint">Delete “${esc(pl.name)}”? This can’t be undone. The songs themselves stay in YouTube Music.</div>
       <div class="pl-form-actions">
         <button type="button" class="pill-btn" id="dlpl-cancel">Cancel</button>
         <button type="button" class="pill-btn primary" id="dlpl-go">${icon('i-trash')}<span>Delete</span></button>
@@ -2621,16 +2480,16 @@ $('#mini-repeat').addEventListener('click', (e) => {
 });
 /* volume on the bar */
 $('#mini-volume').addEventListener('input', (e) => {
-  Player.setVolume(Number(e.target.value));
+  if (Player.yt && Player.ready) Player.yt.setVolume(Number(e.target.value));
   $('#np-volume').value = e.target.value;
 });
 /* click-to-seek on the bar */
 $('#mini-bar').addEventListener('click', (e) => {
-  if (Player.cued || !Player.current) return;
+  if (Player.cued || !Player.yt || !Player.ready) return;
   const r = e.currentTarget.getBoundingClientRect();
   const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-  const dur = Player.getDuration() || 0;
-  if (dur) Player.seekTo(frac * dur, true);
+  const dur = Player.yt.getDuration() || 0;
+  if (dur) Player.yt.seekTo(frac * dur, true);
 });
 $('#np-close').addEventListener('click', closeNowPlaying);
 $('#np-play').addEventListener('click', toggleNowPlayingPlay);
@@ -2681,7 +2540,7 @@ $('#mini-float').addEventListener('click', (e) => { e.stopPropagation(); toggleF
 $('#np-quality').addEventListener('click', toggleQuality);
 $('#np-sb').addEventListener('click', toggleSB);
 $('#np-volume').addEventListener('input', (e) => {
-  Player.setVolume(Number(e.target.value));
+  if (Player.yt) Player.yt.setVolume(Number(e.target.value));
   $('#mini-volume').value = e.target.value;
 });
 $('#np-lyric-preview').addEventListener('click', () => switchNPTab('lyrics'));
@@ -2697,9 +2556,9 @@ const range = $('#np-range');
 range.addEventListener('input', () => { seekDragging = true; });
 range.addEventListener('change', () => {
   seekDragging = false;
-  if (isPreviewing() || !Player.current) return;
-  const dur = Player.getDuration() || 0;
-  Player.seekTo((range.value / 1000) * dur, true);
+  if (isPreviewing() || !Player.yt || !Player.ready) return;
+  const dur = Player.yt.getDuration() || 0;
+  Player.yt.seekTo((range.value / 1000) * dur, true);
 });
 
 function switchNPTab(name) {
@@ -2836,11 +2695,11 @@ function bindFloatWidget(rootDoc) {
   });
   root.querySelector('#fw-bar')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!Player.current) return;
+    if (!Player.yt || !Player.ready) return;
     const r = e.currentTarget.getBoundingClientRect();
     const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    const dur = Player.getDuration() || 0;
-    if (dur) Player.seekTo(frac * dur, true);
+    const dur = Player.yt.getDuration() || 0;
+    if (dur) Player.yt.seekTo(frac * dur, true);
   });
   root.querySelector('#fw-art')?.addEventListener('dblclick', () => {
     closeNowPlaying();
@@ -2960,7 +2819,7 @@ function currentLyricText() {
   if (!L) return '';
   if (L.lines && L.lines.length) {
     let cur = 0;
-    try { cur = Player.getCurrentTime() || 0; } catch {}
+    try { cur = (Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime()) || 0; } catch {}
     let idx = -1;
     for (let i = 0; i < L.lines.length; i++) {
       if (cur >= L.lines[i].t - 0.2) idx = i;
@@ -2990,7 +2849,7 @@ function currentLyricIndex() {
   const L = Player.lyrics;
   if (!L || !L.lines || !L.lines.length) return -1;
   let cur = 0;
-  try { cur = Player.getCurrentTime() || 0; } catch {}
+  try { cur = (Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime()) || 0; } catch {}
   let idx = -1;
   for (let i = 0; i < L.lines.length; i++) {
     if (cur >= L.lines[i].t - 0.2) idx = i;
@@ -3036,8 +2895,8 @@ function drawPipFrame() {
   let idx = currentLyricIndex();
   if (idx < 0) {
     try {
-      const dur = Player.getDuration();
-      const cur = Player.getCurrentTime();
+      const dur = Player.yt && Player.yt.getDuration && Player.yt.getDuration();
+      const cur = Player.yt && Player.yt.getCurrentTime && Player.yt.getCurrentTime();
       idx = dur ? Math.min(lines.length - 1, Math.floor((cur / dur) * lines.length)) : 0;
     } catch { idx = 0; }
   }
@@ -3161,78 +3020,11 @@ setInterval(() => {
 }, 1500);
 
 
-/* PWA: register the shell and expose the browser's native install prompt. */
-const PWA_DISMISS_KEY = 'wesley-pwa-install-dismissed';
-let deferredPwaPrompt = null;
-
-function pwaIsInstalled() {
-  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+/* cleanup: unregister any previously installed service worker */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+  if (window.caches) caches.keys().then((ks) => ks.forEach((k) => k.startsWith('smw-') && caches.delete(k))).catch(() => {});
 }
-
-function pwaWasDismissedRecently() {
-  try {
-    const at = Number(localStorage.getItem(PWA_DISMISS_KEY) || 0);
-    return at > Date.now() - 7 * 24 * 60 * 60 * 1000;
-  } catch {
-    return false;
-  }
-}
-
-function closePwaInstall(remember = false) {
-  const panel = $('#pwa-install');
-  if (panel) panel.classList.add('hidden');
-  if (remember) {
-    try { localStorage.setItem(PWA_DISMISS_KEY, String(Date.now())); } catch {}
-  }
-}
-
-function showPwaInstall({ ios = false } = {}) {
-  const panel = $('#pwa-install');
-  const button = $('#pwa-install-btn');
-  const copy = $('#pwa-install-text');
-  if (!panel || pwaIsInstalled() || pwaWasDismissedRecently()) return;
-  if (ios) {
-    copy.textContent = 'Ketuk Bagikan di Safari, lalu pilih “Add to Home Screen”.';
-    button.classList.add('hidden');
-  } else {
-    copy.textContent = 'Akses lebih cepat dari layar utama dan tetap nyaman saat mendengarkan musik.';
-    button.classList.remove('hidden');
-  }
-  panel.classList.remove('hidden');
-}
-
-function initPwa() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
-  }
-
-  window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault();
-    deferredPwaPrompt = event;
-    window.setTimeout(() => showPwaInstall(), 1800);
-  });
-  window.addEventListener('appinstalled', () => {
-    deferredPwaPrompt = null;
-    closePwaInstall();
-    toast('Wesley Music berhasil dipasang');
-  });
-
-  const installButton = $('#pwa-install-btn');
-  const dismissButton = $('#pwa-install-dismiss');
-  installButton?.addEventListener('click', async () => {
-    if (!deferredPwaPrompt) return closePwaInstall(true);
-    deferredPwaPrompt.prompt();
-    const choice = await deferredPwaPrompt.userChoice;
-    deferredPwaPrompt = null;
-    closePwaInstall(choice.outcome !== 'accepted');
-  });
-  dismissButton?.addEventListener('click', () => closePwaInstall(true));
-
-  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) && !pwaIsInstalled();
-  if (isIos) window.setTimeout(() => showPwaInstall({ ios: true }), 2500);
-}
-
-initPwa();
 
 /* boot */
 (() => {
@@ -3246,7 +3038,6 @@ initPwa();
   window.addEventListener('load', () => setTimeout(hide, 1500));
   setTimeout(hide, 2800);
 })();
-initNativeAudio();
 renderNav();
 renderSideQueue();
 updateThemeIcon();
