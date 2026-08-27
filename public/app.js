@@ -264,33 +264,12 @@ const Player = {
     }
     return false;
   },
-
-  unlockAudio() {
-    if (!this.audio) return;
-    try {
-      if (!this.audio.src) {
-        this.audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-      }
-      const p = this.audio.play();
-      if (p && p.catch) p.catch(() => {});
-    } catch {}
-  },
 };
 
 function initNativeAudio() {
   const a = document.getElementById('audio-player');
   if (!a) return;
   Player.audio = a;
-
-  const unlock = () => {
-    Player.unlockAudio();
-    document.removeEventListener('touchstart', unlock);
-    document.removeEventListener('click', unlock);
-    document.removeEventListener('pointerdown', unlock);
-  };
-  document.addEventListener('touchstart', unlock, { passive: true });
-  document.addEventListener('click', unlock, { passive: true });
-  document.addEventListener('pointerdown', unlock, { passive: true });
 
   a.addEventListener('play', () => {
     document.body.classList.remove('paused');
@@ -306,6 +285,7 @@ function initNativeAudio() {
   });
 
   a.addEventListener('ended', () => {
+    if (!Player.current || !a.duration || a.duration < 2) return;
     if (Player.repeat === 2) {
       Player.seekTo(0);
       Player.play();
@@ -665,10 +645,8 @@ function startCurrent() {
     tryPlayYt();
   } else {
     // Direct Native Audio Mode via Audio Stream Proxy
-    // CRITICAL: Destroy YouTube iframe so Chrome Android keeps audio alive in background
     suspendIframe();
     Player.isNative = true;
-    Player.unlockAudio();
     if (Player.audio) {
       Player.audio.src = `/api/stream?videoId=${encodeURIComponent(s.videoId)}`;
       Player.audio.playbackRate = Player.speed || 1;

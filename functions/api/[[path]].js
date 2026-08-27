@@ -7,11 +7,29 @@ const app = {
   },
   async handle(request) {
     const url = new URL(request.url);
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+          'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, Content-Type',
+          'Access-Control-Max-Age': '86400',
+        },
+      });
+    }
+
     const route = routes.find((entry) => entry.pathname === url.pathname);
     if (!route) return new Response('Not found', { status: 404 });
 
     let status = 200;
-    const headers = new Headers({ 'Cache-Control': 'no-store' });
+    const headers = new Headers({
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, Content-Type',
+    });
     let body = null;
     const res = {
       status(code) {
